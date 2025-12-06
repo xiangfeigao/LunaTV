@@ -9,12 +9,16 @@ WORKDIR /app
 # 先复制依赖文件
 COPY package.json pnpm-lock.yaml ./
 
-# 启用 corepack 并安装指定版本的 pnpm
-RUN corepack enable && \
-    npm install -g pnpm@8.15.7 && \
+# 设置国内镜像源并安装pnpm
+RUN npm config set registry https://registry.npmmirror.com && \
+    corepack enable && \
+    corepack prepare pnpm@8.15.7 --activate && \
     pnpm config set store-dir /app/.pnpm-store && \
-    pnpm config set strict-peer-dependencies false && \
-    pnpm install --frozen-lockfile --prod
+    pnpm config set strict-peer-dependencies false
+
+# 安装依赖（增加重试机制）
+RUN pnpm install --frozen-lockfile --prod || \
+    (echo "第一次安装失败，重试..." && pnpm install --frozen-lockfile --prod)
 
 # ---- 第2阶段：构建项目 ----
 FROM arm32v7/node:20-alpine AS builder
@@ -32,8 +36,9 @@ COPY --from=deps /app/.pnpm-store /.pnpm-store
 COPY . .
 
 # 安装开发依赖（用于构建）
-RUN corepack enable && \
-    npm install -g pnpm@8.15.7 && \
+RUN npm config set registry https://registry.npmmirror.com && \
+    corepack enable && \
+    corepack prepare pnpm@8.15.7 --activate && \
     pnpm install --frozen-lockfile
 
 # 设置构建环境变量
