@@ -1,72 +1,67 @@
-# ---- 第1阶段：安装依赖 ----
-FROM arm32v7/node:20-alpine AS deps
+# ---- 第 1 阶段 阶段：安装依赖 ----
+FROM --platform=$BUILDPLATFORM node:20-alpine AS deps
 
-# 安装编译工具和系统依赖
-RUN apk add --no-cache python3 make g++ git
+# 启用 corepack 并激活 pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-# 先复制依赖文件
+# 仅复制依赖文件以提高缓存效率
 COPY package.json pnpm-lock.yaml ./
 
-# 设置国内镜像源并安装pnpm
-RUN npm config set registry https://registry.npmmirror.com && \
-    corepack enable && \
-    corepack prepare pnpm@8.15.7 --activate && \
-    pnpm config set store-dir /app/.pnpm-store && \
-    pnpm config set strict-peer-dependencies false
+# 安装依赖（包括开发依赖以便于构建）
+RUN pnpm install --frozen-lockfile
 
-# 安装生产依赖
-RUN pnpm install --frozen-lockfile --prod
+# ---- 第 2 阶段 阶段：构建项目 ----
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
-# ---- 第2阶段：构建项目 ----
-FROM arm32v7/node:20-alpine AS builder
-
-# 安装编译工具
-RUN apk add --no-cache python3 make g++
+# 启用 corepack 并激活 pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-# 从deps阶段复制node_modules
+# 从依赖阶段复制 node_modules
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/.pnpm-store /.pnpm-store
 
-# 复制全部源代码
+# 复制源代码
 COPY . .
 
-# 安装开发依赖（用于构建）
-RUN npm config set registry https://registry.npmmirror.com && \
-    corepack enable && \
-    corepack prepare pnpm@8.15.7 --activate && \
-    pnpm install --frozen-lockfile
-
-# 设置构建环境变量
-ENV NODE_ENV=production
+# 设置环境变量以适配 Docker 构建
+ENV DOCKER_ENV=true
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_ANALYTICS_ID=false
 
 # 执行构建
 RUN pnpm run build
 
-# ---- 第3阶段：生成运行时镜像 ----
-FROM arm32v7/node:20-alpine AS runner
-RUN apk add --no-cache curl
+# ---- 第 3 阶段：生成运行时映像 ----
+FROM node:20-alpine AS runner
+
+# 安装必要的系统库以确保兼容性（例如针对某些 Node.js 原生模块）
+RUN apk add --no-cache libc6-compat
+
+# 创建非 root 用户以提高安全性
+RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S nextjs -G nodejs nodejs
 
 WORKDIR /app
+
+# 设置生产环境变量
 ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+ENV DOCKER_ENV=true
+ENV NEXT_TELEMETRY_DISABLED=1
 
-# 从构建器复制必要文件
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+# 从构建阶段复制必要文件并设置正确的所有权
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejsnodejs /app/start.js ./start.js
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# 设置非root用户
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -u 1001 -S nextjs -G nodejs && \
-    chown -R nextjs:nodejs /app
-
+# 切换到非特权用户
 USER nextjs
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+
+# 使用自定义启动脚本
+CMD ["node", "start.js"]
