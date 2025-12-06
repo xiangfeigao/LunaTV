@@ -2,7 +2,7 @@
 FROM arm32v7/node:20-alpine AS deps
 
 # 安装编译工具和系统依赖
-RUN apk add --no-cache python3 make g++ git curl
+RUN apk add --no-cache python3 make g++ git
 
 WORKDIR /app
 
@@ -16,13 +16,8 @@ RUN npm config set registry https://registry.npmmirror.com && \
     pnpm config set store-dir /app/.pnpm-store && \
     pnpm config set strict-peer-dependencies false
 
-# 安装依赖（增加调试信息）
-RUN pnpm install --frozen-lockfile --prod || {
-    echo "=== PNPM INSTALL FAILED ===";
-    pnpm config list;
-    ls -la node_modules;
-    exit 1;
-}
+# 安装生产依赖
+RUN pnpm install --frozen-lockfile --prod
 
 # ---- 第2阶段：构建项目 ----
 FROM arm32v7/node:20-alpine AS builder
