@@ -14,11 +14,17 @@ RUN npm config set registry https://registry.npmmirror.com && \
     corepack enable && \
     corepack prepare pnpm@8.15.7 --activate && \
     pnpm config set store-dir /app/.pnpm-store && \
-    pnpm config set strict-peer-dependencies false
+    pnpm config set strict-peer-dependencies false && \
+    pnpm config set network-concurrency 1 && \
+    pnpm config set child-concurrency 1
 
-# 安装依赖（增加重试机制）
-RUN pnpm install --frozen-lockfile --prod || \
-    (echo "第一次安装失败，重试..." && pnpm install --frozen-lockfile --prod)
+# 安装依赖（增加调试信息）
+RUN pnpm install --frozen-lockfile --prod --reporter append-only || {
+    echo "=== PNPM INSTALL FAILED ===";
+    pnpm config list;
+    ls -la node_modules;
+    exit 1;
+}
 
 # ---- 第2阶段：构建项目 ----
 FROM arm32v7/node:20-alpine AS builder
