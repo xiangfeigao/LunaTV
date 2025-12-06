@@ -1,16 +1,17 @@
-name: Build and Deploy
+name: Build and Push Docker Image
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
       
-      - name: Set up QEMU
+      - name: Set up QEMU for ARM
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm
