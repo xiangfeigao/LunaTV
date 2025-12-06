@@ -32,7 +32,8 @@ COPY . .
 # 设置构建环境变量
 ENV DOCKER_ENV=true
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_SWC_DISABLED=1  # 强制禁用 SWC
+# 强制禁用 SWC
+ENV NEXT_SWC_DISABLED=1  
 
 # 生成生产构建
 RUN pnpm run build
