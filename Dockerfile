@@ -1,54 +1,57 @@
-# ---- 基础阶段：通用设置 ----
-FROM node:20-alpine AS base
-
-# 提前启用 corepack 并准备 pnpm
-RUN corepack enable && \
-    corepack prepare pnpm@8.15.4 --activate
-
 # ---- 第 1 阶段：安装依赖 ----
-FROM base AS deps
+FROM node:20-alpine AS deps
+
+# 启用 corepack 并使用稳定版本的 pnpm
+RUN corepack enable && corepack prepare pnpm@8.15.4 --activate
 
 WORKDIR /app
 
-# 首先单独复制包管理文件以提高缓存效率
+# 仅复制依赖清单，提高构建缓存利用率
 COPY package.json pnpm-lock.yaml* ./
 
-# 清理可能的缓存并重新安装
-RUN pnpm store prune && \
-    pnpm install --frozen-lockfile --prod=false
+# 验证锁定文件是否存在
+RUN if [ ! -f "pnpm-lock.yaml" ]; then echo "❌ pnpm-lock.yaml missing!" && exit 1; fi
 
-# ---- 第 2 阶段：构建项目 ----
-FROM base AS builder
+# 根据锁定文件状态智能选择安装策略
+RUN if pnpm install --frozen-lockfile; then \
+        echo "✅ Frozen lockfile installation successful"; \
+    else \
+        echo "⚠️ Lockfile outdated, updating..."; \
+        pnpm install --no-frozen-lockfile; \
+    fi
+
+# ---- 第 2 阶段 阶段：构建项目 ----
+FROM node:20-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@8.15.4 --activate
 
 WORKDIR /app
 
-# 从依赖阶段复制 node_modules
+# 复制依赖
 COPY --from=deps /app/node_modules ./node_modules
-
-# 复制源代码
+# 复制全部源代码
 COPY . .
 
 # 设置构建环境变量
 ENV DOCKER_ENV=true
-ENV NODE_ENODE_ENV=production
+ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# 验证文件结构
-RUN ls -la && \
-    echo "检查关键文件..." && \
-    [ -f "package.json" ] && echo "✓ package.json 存在" || echo "✗ package.json 缺失"
+# 验证项目结构
+RUN echo "📁 Project structure:" && ls -la && \
+    echo "🔍 Checking key files:" && \
+    [ -f "package.json" ] && echo "✅ package.json exists" || echo "❌ package.json missing"
 
-# 执行构建
+# 生成生产构建
 RUN pnpm run build
 
 # ---- 第 3 阶段：生成运行时镜像 ----
-FROM node:20-alpine AS runner
+FROM node:20-alpine-alpine AS runner
 
-# 安装必要的系统依赖以确保兼容性
+# 安装 ARMv7 兼容的系统库
 RUN apk add --no-cache \
     libc6-compat \
-    tzdata && \
-    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+    ca-certificates
 
 # 创建非 root 用户
 RUN addgroup -g 1001 -S nodejs && \
@@ -61,28 +64,29 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 ENV DOCKER_ENV=true
-ENV TZ=Asia/Shanghai
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# 从构建器复制必要文件
+# 从构建器中复制必要文件
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
-COPY --from=builder --chown=nextjs:nodejsnodejs /app/start.js ./start.js
+COPY --from=builder --chown=nextjs:nodejsnodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/start.js ./start.js
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejsnodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# 验证复制的文件结构
-RUN echo "验证运行时文件：" && \
-    [ -f "start.js" ] && echo "✓ start.js 存在" || echo "✗ start.js 缺失" && \
-    [ -d ".next/static" ] && echo "✓ static 目录存在" || echo "✗ static 目录缺失"
+# 验证运行时文件
+RUN echo "🔍 Verifying runtime files:" && \
+    [ -f "start.js" ] && echo "✅ start.js exists" || echo "❌ start.js missing" && \
+    [ -d "public" ] && echo "✅ public directory exists" || echo "❌ public directory missing" && \
+    [ -d ".next/static" ] && echo "✅ static assets exist" || echo "❌ static assets missing"
 
 # 切换到非特权用户
 USER nextjs
 
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node scripts/healthcheck.js || exit 1
+# 健康检查（可选）
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 # 使用自定义启动脚本
 CMD ["node", "start.js"]
