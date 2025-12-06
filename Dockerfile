@@ -14,12 +14,10 @@ RUN npm config set registry https://registry.npmmirror.com && \
     corepack enable && \
     corepack prepare pnpm@8.15.7 --activate && \
     pnpm config set store-dir /app/.pnpm-store && \
-    pnpm config set strict-peer-dependencies false && \
-    pnpm config set network-concurrency 1 && \
-    pnpm config set child-concurrency 1
+    pnpm config set strict-peer-dependencies false
 
 # 安装依赖（增加调试信息）
-RUN pnpm install --frozen-lockfile --prod --reporter append-only || {
+RUN pnpm install --frozen-lockfile --prod || {
     echo "=== PNPM INSTALL FAILED ===";
     pnpm config list;
     ls -la node_modules;
