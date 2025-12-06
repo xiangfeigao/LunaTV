@@ -1,6 +1,16 @@
 # ---- 第 1 阶段：安装依赖 ----
 FROM arm32v7/node:20-alpine AS deps
+RUN apk add --no-cache python3 make g++
 
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+
+# 清理可能的缓存并安装
+RUN corepack enable && \
+    corepack prepare pnpm@latest --activate && \
+    pnpm config set store-dir /app/.pnpm-store && \
+    pnpm install --frozen-lockfile --strict-peer-dependencies
+    
 # 安装编译工具和系统依赖
 RUN apk add --no-cache python3 make g++
 
