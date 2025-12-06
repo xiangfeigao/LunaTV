@@ -1,5 +1,6 @@
 # ---- 第 1 阶段：安装依赖 ----
 FROM arm32v7/node:20-alpine AS deps
+RUN pnpm install @babel/core @babel/preset-env @babel/preset-react --save-dev
 
 # 启用 corepack 并激活 pnpm（Node 20 默认提供 corepack）
 RUN corepack enable && corepack prepare pnpm@latest --activate
