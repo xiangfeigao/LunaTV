@@ -75,5 +75,12 @@ const withPWA = require('next-pwa')({
   register: true,
   skipWaiting: true,
 });
-
-module.exports = withPWA(nextConfig);
+module.exports = {
+     experimental: {
+       forceSwcTransforms: false, // 禁用强制 SWC
+     },
+     compiler: {
+       styledComponents: true, // 如果有样式库
+     },
+     swcMinify: false, // 禁用 SWC 压缩
+   }
