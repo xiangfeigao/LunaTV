@@ -1,40 +1,73 @@
-name: Build and Push to GHCR
+name: Build and Push ARMv7 Docker Image
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      
+    
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up QEMU for ARM
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        # 这确保了 pnpm-lock.yaml 被正确检出
+        fetch-depth: 0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'pnpm'
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Install pnpm
+      run: npm install -g corepack && corepack enable
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/arm/v7
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/your-image-name:latest
-            ghcr.io/${{ github.repository_owner }}/your-image-name:${{ github.sha }}
+    - name: Pre-sync dependencies (if needed)
+      run: |
+        # 只在有 package.json 变更时才需要此步骤
+        if git diff --name-only HEAD~1 HEAD | grep -q package.json; then
+          echo "📦 Package.json changed, ensuring lockfile consistency..."
+          pnpm install --no-frozen-lockfile
+        else
+          echo "✅ No changes to package.json, proceeding with existing lockfile"
+        fi
+
+    - name: Set up QEMU for ARM
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64,arm
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/arm/v7
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        # 允许构建过程中更新锁定文件
+        no-cache-filters: pnpm-lnpm-lock.yaml
